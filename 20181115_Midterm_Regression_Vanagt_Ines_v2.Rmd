@@ -1,0 +1,281 @@
+---
+title: "20181115_Midterm_Regression_Vanagt_Ines"
+author: "Ines Vanagt"
+date: "11/15/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(cache = FALSE)
+```
+
+# Introduction
+
+People interested in buying real estate often want to be able to assess correctly the current / future price of a property in order to recognize whether the property is overrated or underrated, before investing in it. In this project, I will try to help them by showing how price varies according to property features.  
+
+For instance, what people might be interesting in knowing is :  
+1. Do houses with higher bathroom / bedroom ratio have higher prices? My hypothesis is: __Yes, of course, houses with higher bathroom / bedroom ratio have higher prices__   
+2. Is an additional bathroom per bedroom worth more than an additional garage? My hypothesis is: __Yes, a house with an additional bathroom per bedroom is worth more than an additional garage__, since it is often possible to park one's car in the street.  
+
+# Exploratory Data Analysis
+
+## Dataset exploration and transformation
+
+```{r libraries, include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(DataExplorer)
+library(FactoMineR)
+library(caTools)
+```
+
+```{r dataset observation}
+realestate <- read.csv("realestate.csv", row.names =1)
+glimpse(realestate)
+```
+
+The data set is a dataframe. Each row corresponds to one observation, so here we have __522 observations__.  
+Each column corresponds to one variable, so here we are studying __11 variables__ (the 1st one, ID, is actually just an index and corresponds to the row number, and that I already removed as I was reading the csv file).  
+
+- __Price:__ Sales price of the property, in currency unit (quantitative)
+- __Sqft:__ Size of the house in square feet (quantitative)
+- __Bedroom:__ Number of bedrooms of the property (quantitative)
+- __Bathroom:__ Number of bathrooms of the property (quantitative)
+- __Airconditioning:__ presence (1) or absence (0) of air conditionning (qualitative, input as a dummy variable)
+- __Garage:__ Number of garages of the property (quantitative)
+- __Pool:__ presence (1) or absence (0) of a pool (qualitative, input as a dummy variable)
+- __YearBuild:__ Year of construction of the house (quantitative)
+- __Quality:__ assessment of the quality of a house, going from 1 for excellent quality houses to 3 for bad quality houses (qualitative)
+- __AdjHighway:__ presence (1) or absence (0) of an adjacent highway (qualitative, input as a dummy variable)
+
+The variable that we want to explain or predict is the Price. The 10 other variables are potential predictors.
+
+I will first edit the dataset, mainly to edit the potential predictors and create others:  
+- I first __add the ratio Bathroom/Bedroom__ in order to evaluate the impact of this predictor on the price. In order to do so, I had a look at which houses had no Bedroom: there is only one, and it seems to be an error since it is a very expensive house with 3 garages and of Top quality. This is the first outlier we encounter ; I will discard it because I think it is simply wrong.  
+- I then __transform YearBuild into Age__.  
+- I finally __transform the quality variable into 3 dummies__.  
+
+```{r dataset modifications}
+new_realestate <- realestate %>% 
+  filter(Bedroom != 0) %>% 
+  mutate(Age = 1998 - YearBuild,
+         Quality_Top = as.integer(Quality == 1),
+         Quality_Medium = as.integer(Quality == 2),
+         Quality_Low = as.integer(Quality == 3),
+         Ratio_Bath_Bed= Bathroom/Bedroom)
+new_realestate_mlm <- new_realestate %>% 
+  dplyr::select(- c(YearBuild, Quality, Bathroom, Quality_Medium))
+glimpse(new_realestate)
+```
+
+## Response variable and correlations between variables
+
+```{r fig1, fig.width=5, fig.height=3, fig.align = "center"}
+ggplot(new_realestate) + aes(x = Price) + ggtitle("Distribution of the Price Response Variable") + geom_histogram(bins = 50)
+```
+
+As we can see, prices are distributed with a positive skewness. There are only a few houses worth more than 750 000 euros, which could mean that __we might not have enough data to assess correctly the prices for such houses__.
+
+Let us have a look at the correlations between variables :
+
+```{r fig2, fig.width=10, fig.height=5, fig.align = "center"}
+par(mfrow = c(1,2))
+plot_correlation(new_realestate)
+```
+ 
+- We can see a __very strong correlation between Sqft and Price (0.82)__.  
+- Other variables are highly correlated with Price: __Bathroom, Quality_Top, Bedroom, Garage are positively correlated with Price__, while __Age is negatively correlated with Price__.  
+- __A lot of variables are also correlated with one another__ (Bathroom and Bedroom have a correlation of 0.58, and the Quality variables seem correlated with many features: Sqft, Bathroom, Garage, Age...). We need to be careful when running a multiple regression because __correlations can cause high errors in the model__. 
+
+# Simple Linear Regression
+
+__Question:__ ___Do houses with higher bathroom/bedroom ratio have higher price?___
+
+```{r fig3, fig.width=5, fig.height=3, fig.align = "center"}
+ggplot(new_realestate) + aes(x = Price, y = Ratio_Bath_Bed, col = Quality) + ggtitle("Scatterplot of the bathroom / bedroom ratio and price of properties") + geom_point()
+```
+
+- There seems to be a __positive slope__, and a __positive correlation__, between the number of bathrooms per bedroom and the price.  
+- However, the high dispersion of values around a potential regression line is high, which means that __it might not be the most important predictive factor__.  
+- The color shows that the increase in Price could also be due to the higher general quality of houses with a high Bathroom/Bedroom Ratio, and not only to the ratio in itself.   
+- This illustrates the problem one can be faced with because of correlations. Indeed, we saw earlier that __many variables are correlated with one another, which can make it difficult to interprete the results__.  
+
+Before modeling anything, __I separated our data set into train (80%) and test sets (20%)__. I will run my models on the train dataset, and then test them on the test dataset, to show how well they do.
+
+```{r}
+dt = sort(sample(nrow(new_realestate_mlm), nrow(new_realestate_mlm)*.8))
+train_new_realestate <-new_realestate_mlm[dt,]
+test_new_realestate <-new_realestate_mlm[-dt,]
+```
+
+Let us run a simple linear regression on the training set, to try to explain the Price with the Bathroom/Bedroom ratio.
+
+```{r}
+model_simple <- lm(Price~ Ratio_Bath_Bed, data = train_new_realestate)
+summary(model_simple)
+```
+
+```{r}
+model_simple$coefficients[2]
+```
+
+Indeed, for each additional bathroom per bedroom, the price increases by this amount. __Our hypothesis is confirmed!__
+However, we need to be very careful: this is true for the data set that we have, but the high correlation between variables implies that it might not really be the increase in the ratio, but the general higher quality of the houses with great bathroom/bedroom ratios, that is responsible for this positive coefficient.
+
+Let us look at the __quality of the prediction__ we can do on the 20 % of rows left. In order to so, I will take as a metric the squared correlation between the predicted prices and the real prices. Of course, this might not be the most relevant metric, but since we did not study the model selection formulas at the moment I will assume that I do not know any better metric.
+
+```{r}
+test_new_realestate$simpleresults <-predict(model_simple, test_new_realestate)
+cor(test_new_realestate$simpleresults,test_new_realestate$Price)^2
+```
+
+__The correlation between the Price and the predicted Price of our model is not very big__.
+We therefore might want to perform a multiple linear regression, to look at which are the more important predictors.
+
+# Multiple Linear Regression
+
+## The full model
+
+I am first going to __run a regression on all variables, to show that it would be pretty bad in view of all the correlations between variables__ we noticed earlier. I just removed Quality (replaced by Quality_Top and Quality_Low), Yearbuild (replaced by Age), and Bathroom (reaplced by Ratio Bath_Bed), because of the evident correlation between these and new variables I created.
+
+```{r least squares estimator}
+model_full <- lm(Price~., data = train_new_realestate)
+summary(model_full)
+```
+
+Let us look at the __prediction results__:
+
+```{r}
+test_new_realestate$fullresults <- predict(model_full, test_new_realestate)
+cor(test_new_realestate$fullresults,test_new_realestate$Price)^2
+```
+
+- The prediction results are much better since __the correlation between the true prices and the predicted prices is now way better__.  
+- The p-value of the F-test is very small, so there is __at least one significant variable__.  
+- However, __very few variables are statistically significant__ as indicated by the T-test, and they do not seem to be the most important ones from a practical point of view.  
+
+We therefore might want to __remove some variables__. 
+
+## The reduced model
+
+In view of the correlations we saw before:  
+- we can try to discard AdjHighway, Pool and Airconditioning because they have a very low correlation with Price    
+- we can try to discard the Bedroom and Quality_Low variables because of their correlation with other variables that we keep, such as Ratio_Bath_Bed and Sqft  
+
+```{r}
+model_reduced <- lm(Price ~.-AdjHighway-Pool-Airconditioning-Bedroom-Quality_Low, data = train_new_realestate)
+summary(model_reduced)
+```
+
+Let's have a look at the __prediction error__:
+
+```{r}
+test_new_realestate$reducedresults <-predict(model_reduced, test_new_realestate)
+cor(test_new_realestate$reducedresults,test_new_realestate$Price)^2
+```
+
+The __correlation between our prediction and the real price is still good__. This time, more coefficients are significant. Let's check that we are not missing anything big with this new reduced model by performing an __ANOVA__.  
+
+```{r}
+anova(model_reduced, model_full)
+```
+
+The output shows the results of the partial F-test. Since the p-value is higher than 5%, we cannot reject the null hypothesis at the 5% level of significance. It appears that __the variables I removed do not contribute significant information to the sales price once the other variables have been taken into consideration.__ We can therefore delete them from our model.
+
+Let us now look at the residuals of our model and __make some diagnostics__:
+
+```{r}
+shapiro.test(resid(model_reduced))
+par(mfrow = c(2,2))
+plot(model_reduced)
+```
+
+The Shapiro test gives a very small p-value : __we reject the hypothesis of normality of the residuals__.  
+A quick look at the plots generated to make diagnostics confirms that something is not right with this model:  
+- The residuals vs. fitted plot should show randomly distributed points around a right horizontal line at level O. However, we see a __bigger dispersion on the right of the model, that is to say when the price is big__.  
+- The second and third plots confirm that the residuals are no longer distributed normally when the value is extreme.  
+- Finally, the last plot shows that there are some outliers with a big leverage but big residuals too, which is bad.
+
+This analysis of the residuals shows that __something happens with big values: residuals are too big__. We should try to transform some predictors to better take into account this effect.
+
+Let's now __have a look at the outliers__: 
+
+```{r outliers}
+par(mfrow = c(2,2))
+plot(cooks.distance(model_reduced))
+plot(influence(model_reduced)$hat)
+plot(rstandard(model_reduced))
+plot(rstudent(model_reduced))
+train_new_realestate[rank(-abs(rstudent(model_reduced))) <= 10,]
+```
+
+Among these outliers are indeed some properties with very high prices (since the mean is 277894 and the 3rd quartile 335000). These seem to be great mansions with lots of bedrooms, garages, generally built quite recently, of good quality, with no adjacent highway.  
+
+We could either :  
+- consider that we want to exclude them because we do not have enough data for luxury houses or that they show another phenomenon that we are not studying  
+- keep them, thinking that maybe the model is not working because it is not a linear model  
+
+At this stage, it can be dangerous to discard the outliers because we might just be considering a wrong model. So __for now we will keep them and try to find a better model__.
+
+## The transformed reduced model
+
+In this new transformed and reduced model, I will keep the variables I had in the previous reduced version and:  
+- __Transform the response into a logarithm of the response__: indeed, the distribution of the residuals (too big for high prices, quite small for low prices) indicates a logarithmic form of the response  
+- __Add an interaction term between the size of the house (Sqft) and the Lot size (Lot)__ since it does sound reasonable  
+- __Edit the Quality_Top variable to turn it into exp(Quality_Top)__
+
+I will test this model to check if it gives better results than the previous one.
+
+```{r echo = TRUE}
+model_reduced_transformed <- lm(log(Price) ~Sqft+Lot+Ratio_Bath_Bed+Garage+Age+exp(Quality_Top) + Sqft:Lot, data = train_new_realestate)
+summary(model_reduced_transformed)
+```
+
+This time, __most coefficients are statistically significant at level 5% according to the t-test__. 
+Let's look at the __prediction quality__
+
+```{r}
+test_new_realestate$transformedreducedresults <-predict(model_reduced_transformed, test_new_realestate)
+cor(test_new_realestate$transformedreducedresults,test_new_realestate$Price)^2
+```
+
+The prediction of the prices is correlated with the real prices at a similar level as for the previous model, and __it is a good level of prediction__.
+
+Let's look at the __distribution of the residuals__:
+
+```{r}
+shapiro.test(resid(model_reduced_transformed))
+par(mfrow = c(2,2))
+plot(model_reduced_transformed)
+```
+
+- This time, the p-value of the Shapiro-test is bigger than 5% : __we cannot reject the hypothesis of gaussian residuals.__  (even if with another random training and testing sets, the p-value was smaller, it would still be bigger than the one we had with the previous models, so this model is closer to the hypothesis of gaussian residuals than the previous ones).
+- The normal QQ plot shows a better adequation between the distribution of residuals and a normal distribution  
+- The residuals vs Fitted and Scale-Location plots show randomly distributed points  
+- There are fewer points with high leverage and high residual, which is good  
+
+Let's now have a final look at the outliers: 
+
+```{r outliers2}
+par(mfrow = c(2,2))
+plot(cooks.distance(model_reduced_transformed))
+plot(influence(model_reduced_transformed)$hat)
+plot(rstandard(model_reduced_transformed))
+plot(rstudent(model_reduced_transformed))
+```
+
+A quick look at these plots show that there are now __fewer outliers__: we were right not to discard them, it was mainly the model's fault and not the data's fault.
+
+# Conclusion
+
+```{r}
+model_reduced_transformed$coefficients
+```
+
+To conclude, we gave many reasons why this final reduced and transformed model is better than the ones we tried before.  
+Therefore, I will give a final conclusion on my hypotheses using this model:  
+
+_1. Do houses with higher bathroom / bedroom ratio have higher prices?_ My hypothesis was right: the coefficient in front of Ratio_Bath_Bed in our model is positive, and log is an increasing function. __Adding in average one bathroom per bedroom brings value to a house.__
+
+_2. Is an additional bathroom per bedroom worth more than an additional garage?_ My hypothesis was right: the Ratio's coefficient is higher than the Garage coefficient, so yes, in average __an additional bathroom per bedroom will make the house more valuable than one more garage, although they are actually quite close.__
